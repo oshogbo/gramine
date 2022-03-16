@@ -25,8 +25,6 @@
 #include "shim_utils.h"
 #include "stat.h"
 
-#define KEEP_URI_PREFIX 0
-
 /*
  * Always add a read permission to files created on host, because PAL requires opening the file even
  * for operations such as `unlink` or `chmod`.
@@ -51,15 +49,7 @@ static const char* strip_prefix(const char* uri) {
     return s + 1;
 }
 
-/*
- * Calculate the URI for a dentry. The URI scheme is determined by file type (`type` field). It
- * needs to be passed separately (instead of using `dent->inode->type`) because the dentry might not
- * have inode associated yet: we might be creating a new file, or looking up a file we don't know
- * yet.
- *
- * If `type` is KEEP_URI_PREFIX, we keep the URI prefix from mount URI.
- */
-static int chroot_dentry_uri(struct shim_dentry* dent, mode_t type, char** out_uri) {
+int chroot_dentry_uri(struct shim_dentry* dent, mode_t type, char** out_uri) {
     assert(dent->mount);
     assert(dent->mount->uri);
 
@@ -360,7 +350,7 @@ static int chroot_truncate(struct shim_handle* hdl, file_off_t size) {
     return ret;
 }
 
-static int chroot_readdir(struct shim_dentry* dent, readdir_callback_t callback, void* arg) {
+int chroot_readdir(struct shim_dentry* dent, readdir_callback_t callback, void* arg) {
     int ret;
     PAL_HANDLE palhdl;
     char* buf = NULL;
@@ -420,7 +410,7 @@ out:
     return ret;
 }
 
-static int chroot_unlink(struct shim_dentry* dent) {
+int chroot_unlink(struct shim_dentry* dent) {
     assert(locked(&g_dcache_lock));
     assert(dent->inode);
 
