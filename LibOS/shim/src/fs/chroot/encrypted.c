@@ -6,14 +6,32 @@
 /*
  * This implements the `chroot_encrypted` filesystem, intended to replace PAL protected files.
  *
+ * This filesystem keeps the following data:
+ *
+ * - The mount (`shim_mount`) holds a `shim_encrypted_files_key` object. This is the encryption key
+ *   for files. Multiple mounts can use the same key. The list of keys is managed in
+ *   `shim_fs_encrypted.c`.
+ *
+ * - Inodes (`shim_inode`, for regular files) hold a `shim_encrypted_file` object. This object lives
+ *   as long as the inode, but is kept *open* only as long as there are `shim_handle` objects
+ *   corresponding to it. We use `encrypted_file_{get,put}` operations to maintain that invariant.
+ *
+ *   An open `shim_encrypted_file` object keeps an open PAL handle and associated data
+ *   (`pf_context_t`), so that operations (read, write, truncate...) can be performed on the file.
+ *
+ * - Handles (`shim_handle`) hold no extra data. File operations on a handle use the
+ *   `shim_encrypted_file` object for its inode. As a result, multiple handles for a given file
+ *   still correspond to one PAL handle.
+ *
  * TODO (most items are needed for feature parity with PAL protected files):
  *
  * - mounting with other keys than "default"
  * - mounting with special keys (SGX MRENCLAVE and MRSIGNER)
- * - setting keys through /dev/attestation
- * - rename
+ * - setting keys through /dev/attestation (and making sure they're copied to child process)
+ * - rename (needs support in the `protected_files` module)
  * - mmap
- * - truncate (the protected_files module only supports extending the file)
+ * - truncate (the current `truncate` operation works only for extending the file, support for
+ *   truncation needs to be added to the `protected_files` module)
  */
 
 #define _POSIX_C_SOURCE 200809L /* for SSIZE_MAX */
@@ -119,7 +137,7 @@ static int chroot_encrypted_lookup(struct shim_dentry* dent) {
         file_off_t size;
 
         struct shim_encrypted_files_key* key = dent->mount->data;
-        ret = encrypted_file_new_open(uri, key, &enc);
+        ret = encrypted_file_open(uri, key, &enc);
         if (ret < 0) {
             goto out;
         }
@@ -188,7 +206,7 @@ static int chroot_encrypted_creat(struct shim_handle* hdl, struct shim_dentry* d
 
     struct shim_encrypted_files_key* key = dent->mount->data;
     struct shim_encrypted_file* enc;
-    ret = encrypted_file_new_create(uri, HOST_PERM(perm), key, &enc);
+    ret = encrypted_file_create(uri, HOST_PERM(perm), key, &enc);
     if (ret < 0)
         goto out;
 

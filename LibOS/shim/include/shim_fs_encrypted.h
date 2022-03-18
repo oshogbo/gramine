@@ -30,13 +30,14 @@ DEFINE_LISTP(shim_encrypted_files_key);
 struct shim_encrypted_files_key {
     char* name;
     bool is_set;
-    pf_key_t key;
+    pf_key_t pf_key;
 
     LIST_TYPE(shim_encrypted_files_key) list;
 };
 
 /*
  * Represents a specific encrypted file. The file is open as long as `use_count` is greater than 0.
+ * Note that the file can be open and closed multiple times before it's destroyed.
  *
  * Operations on a single `shim_encrypted_file` are NOT thread-safe, it is intended to be protected
  * by a lock.
@@ -45,6 +46,8 @@ struct shim_encrypted_file {
     unsigned int use_count;
     char* uri;
     struct shim_encrypted_files_key* key;
+
+    /* `pf` and `pal_handle` are non-null as long as `use_count` is greater than 0 */
     pf_context_t* pf;
     PAL_HANDLE pal_handle;
 };
@@ -84,8 +87,8 @@ int update_encrypted_files_key(struct shim_encrypted_files_key* key, char* key_s
  *
  * The newly created `shim_encrypted_file` object will have `use_count` set to 1.
  */
-int encrypted_file_new_open(const char* uri, struct shim_encrypted_files_key* key,
-                            struct shim_encrypted_file** out_enc);
+int encrypted_file_open(const char* uri, struct shim_encrypted_files_key* key,
+                        struct shim_encrypted_file** out_enc);
 
 /*
  * \brief Create a new encrypted file.
@@ -99,8 +102,8 @@ int encrypted_file_new_open(const char* uri, struct shim_encrypted_files_key* ke
  *
  * The newly created `shim_encrypted_file` object will have `use_count` set to 1.
  */
-int encrypted_file_new_create(const char* uri, mode_t perm, struct shim_encrypted_files_key* key,
-                              struct shim_encrypted_file** out_enc);
+int encrypted_file_create(const char* uri, mode_t perm, struct shim_encrypted_files_key* key,
+                          struct shim_encrypted_file** out_enc);
 
 /*
  * \brief Deallocate an encrypted file.
@@ -112,7 +115,7 @@ void encrypted_file_destroy(struct shim_encrypted_file* enc);
 /*
  * \brief Increase the use count of an encrypted file.
  *
- * This increases `use_count`, and makes sure that the file is open.
+ * This increases `use_count`, and opens the file if `use_count` was 0.
  */
 int encrypted_file_get(struct shim_encrypted_file* enc);
 

@@ -29,7 +29,7 @@ static pf_status_t cb_read(pf_handle_t handle, void* buffer, uint64_t offset, si
         size_t count = remaining;
         int ret = DkStreamRead(pal_handle, offset + buffer_offset, &count, buffer + buffer_offset,
                                /*source=*/NULL, /*size=*/0);
-        if (ret == PAL_ERROR_INTERRUPTED)
+        if (ret == -PAL_ERROR_INTERRUPTED)
             continue;
 
         if (ret < 0) {
@@ -59,7 +59,7 @@ static pf_status_t cb_write(pf_handle_t handle, const void* buffer, uint64_t off
         size_t count = remaining;
         int ret = DkStreamWrite(pal_handle, offset + buffer_offset, &count,
                                 (void*)(buffer + buffer_offset), /*dest=*/NULL);
-        if (ret == PAL_ERROR_INTERRUPTED)
+        if (ret == -PAL_ERROR_INTERRUPTED)
             continue;
 
         if (ret < 0) {
@@ -142,8 +142,13 @@ static void cb_debug(const char* msg) {
 }
 #endif
 
-static int encrypted_file_open(struct shim_encrypted_file* enc, PAL_HANDLE pal_handle, bool create,
-                               pal_share_flags_t share_flags) {
+/*
+ * The `pal_handle` parameter is used if this is a checkpointed file, and we have received the PAL
+ * handle from the parent process. Note that in this case, it would not be safe to attempt opening
+ * the file again in the child process, as it might actually be deleted on host.
+ */
+static int encrypted_file_internal_open(struct shim_encrypted_file* enc, PAL_HANDLE pal_handle,
+                                        bool create, pal_share_flags_t share_flags) {
     assert(!enc->pf);
 
     const char* path = enc->uri + static_strlen(URI_PREFIX_FILE);
@@ -173,10 +178,11 @@ static int encrypted_file_open(struct shim_encrypted_file* enc, PAL_HANDLE pal_h
     if (!enc->key->is_set) {
         log_warning("%s: key '%s' is not set", __func__, enc->key->name);
         unlock(&g_keys_lock);
+        DkObjectClose(pal_handle);
         return -EACCES;
     }
     pf_status_t pfs = pf_open(pal_handle, path, size, PF_FILE_MODE_READ | PF_FILE_MODE_WRITE,
-                              create, &enc->key->key, &pf);
+                              create, &enc->key->pf_key, &pf);
     unlock(&g_keys_lock);
     if (PF_FAILURE(pfs)) {
         log_warning("%s: pf_open failed: %s", __func__, pf_strerror(pfs));
@@ -189,7 +195,7 @@ static int encrypted_file_open(struct shim_encrypted_file* enc, PAL_HANDLE pal_h
     return 0;
 }
 
-static void encrypted_file_close(struct shim_encrypted_file* enc) {
+static void encrypted_file_internal_close(struct shim_encrypted_file* enc) {
     assert(enc->pf);
 
     pf_status_t pfs = pf_close(enc->pf);
@@ -215,7 +221,7 @@ int init_encrypted_files(void) {
                      &cb_aes_cmac, &cb_aes_gcm_encrypt, &cb_aes_gcm_decrypt,
                      &cb_random, cb_debug_ptr);
 
-    /* Parse `fs.keys.*` */
+    /* Parse `fs.insecure__keys.*` */
 
     toml_table_t* manifest_fs = toml_table_in(g_manifest_root, "fs");
     if (!manifest_fs)
@@ -248,6 +254,7 @@ int init_encrypted_files(void) {
             goto out;
         }
         assert(key_str);
+
         ret = update_encrypted_files_key(key, key_str);
         if (ret < 0) {
             log_error("Cannot update key '%s': %d", name, ret);
@@ -313,17 +320,18 @@ int update_encrypted_files_key(struct shim_encrypted_files_key* key, char* key_s
         goto out;
     }
 
+    pf_key_t pf_key;
     for (size_t i = 0; i < len; i += 2) {
         int8_t hi = hex2dec(key_str[i]);
         int8_t lo = hex2dec(key_str[i+1]);
         if (hi < 0 || lo < 0) {
             log_warning("%s: unexpected character encountered", __func__);
-            free(key);
             ret = -EINVAL;
             goto out;
         }
-        key->key[i / 2] = hi * 16 + lo;
+        pf_key[i / 2] = hi * 16 + lo;
     }
+    memcpy(key->pf_key, &pf_key, sizeof(pf_key));
     key->is_set = true;
     ret = 0;
 out:
@@ -331,8 +339,8 @@ out:
     return ret;
 }
 
-static int encrypted_file_new(const char* uri, struct shim_encrypted_files_key* key,
-                       struct shim_encrypted_file** out_enc) {
+static int encrypted_file_alloc(const char* uri, struct shim_encrypted_files_key* key,
+                                struct shim_encrypted_file** out_enc) {
     assert(strstartswith(uri, URI_PREFIX_FILE));
 
     if (!key) {
@@ -357,14 +365,15 @@ static int encrypted_file_new(const char* uri, struct shim_encrypted_files_key* 
     return 0;
 }
 
-int encrypted_file_new_open(const char* uri, struct shim_encrypted_files_key* key,
-                            struct shim_encrypted_file** out_enc) {
+int encrypted_file_open(const char* uri, struct shim_encrypted_files_key* key,
+                        struct shim_encrypted_file** out_enc) {
     struct shim_encrypted_file* enc;
-    int ret = encrypted_file_new(uri, key, &enc);
+    int ret = encrypted_file_alloc(uri, key, &enc);
     if (ret < 0)
         return ret;
 
-    ret = encrypted_file_open(enc, /*pal_handle=*/NULL, /*create=*/false, /*share_flags=*/0);
+    ret = encrypted_file_internal_open(enc, /*pal_handle=*/NULL, /*create=*/false,
+                                       /*share_flags=*/0);
     if (ret < 0) {
         encrypted_file_destroy(enc);
         return ret;
@@ -374,14 +383,14 @@ int encrypted_file_new_open(const char* uri, struct shim_encrypted_files_key* ke
     return 0;
 }
 
-int encrypted_file_new_create(const char* uri, mode_t perm, struct shim_encrypted_files_key* key,
-                              struct shim_encrypted_file** out_enc) {
+int encrypted_file_create(const char* uri, mode_t perm, struct shim_encrypted_files_key* key,
+                          struct shim_encrypted_file** out_enc) {
     struct shim_encrypted_file* enc;
-    int ret = encrypted_file_new(uri, key, &enc);
+    int ret = encrypted_file_alloc(uri, key, &enc);
     if (ret < 0)
         return ret;
 
-    ret = encrypted_file_open(enc, /*pal_handle=*/NULL, /*create=*/true, perm);
+    ret = encrypted_file_internal_open(enc, /*pal_handle=*/NULL, /*create=*/true, perm);
     if (ret < 0) {
         encrypted_file_destroy(enc);
         return ret;
@@ -393,6 +402,8 @@ int encrypted_file_new_create(const char* uri, mode_t perm, struct shim_encrypte
 
 void encrypted_file_destroy(struct shim_encrypted_file* enc) {
     assert(enc->use_count == 0);
+    assert(!enc->pf);
+    assert(!enc->pal_handle);
     free(enc->uri);
     free(enc);
 }
@@ -404,7 +415,8 @@ int encrypted_file_get(struct shim_encrypted_file* enc) {
         return 0;
     }
     assert(!enc->pf);
-    int ret = encrypted_file_open(enc, /*pal_handle=*/NULL, /*create=*/false, /*share_flags=*/0);
+    int ret = encrypted_file_internal_open(enc, /*pal_handle=*/NULL, /*create=*/false,
+                                           /*share_flags=*/0);
     if (ret < 0)
         return ret;
     enc->use_count++;
@@ -416,7 +428,7 @@ void encrypted_file_put(struct shim_encrypted_file* enc) {
     assert(enc->pf);
     enc->use_count--;
     if (enc->use_count == 0) {
-        encrypted_file_close(enc);
+        encrypted_file_internal_close(enc);
     }
 }
 
@@ -433,6 +445,8 @@ int encrypted_file_flush(struct shim_encrypted_file* enc) {
 
 int encrypted_file_read(struct shim_encrypted_file* enc, void* buf, size_t buf_size,
                         file_off_t offset, size_t* out_count) {
+    assert(enc->pf);
+
     if (offset < 0)
         return -EINVAL;
     if (OVERFLOWS(uint64_t, offset))
@@ -450,6 +464,8 @@ int encrypted_file_read(struct shim_encrypted_file* enc, void* buf, size_t buf_s
 
 int encrypted_file_write(struct shim_encrypted_file* enc, const void* buf, size_t buf_size,
                          file_off_t offset, size_t* out_count) {
+    assert(enc->pf);
+
     if (offset < 0)
         return -EINVAL;
     if (OVERFLOWS(uint64_t, offset))
@@ -460,7 +476,7 @@ int encrypted_file_write(struct shim_encrypted_file* enc, const void* buf, size_
         log_warning("%s: pf_write failed: %s", __func__, pf_strerror(pfs));
         return -EACCES;
     }
-    /* We never write less than `buf_size */
+    /* We never write less than `buf_size` */
     *out_count = buf_size;
     return 0;
 }
@@ -512,7 +528,12 @@ BEGIN_CP_FUNC(encrypted_file) {
     new_enc->use_count = enc->use_count;
     DO_CP_MEMBER(str, enc, new_enc, uri);
 
-    /* HACK: Instead of `enc->key`, send the key name */
+    /*
+     * HACK: Instead of `enc->key`, send the key name.
+     *
+     * TODO: Once we can change the keys through `/dev/attestation`, this will not be enough: we'll
+     * need to copy the current key value. Convert this to `DEFINE_CP_FUNC(encrypted_file_key)` etc.
+     */
     DO_CP(str, enc->key->name, &new_enc->key);
 
     /* `enc->pf` will be recreated during restore */
@@ -547,7 +568,8 @@ BEGIN_RS_FUNC(encrypted_file) {
     assert(!enc->pf);
     if (enc->use_count > 0) {
         assert(enc->pal_handle);
-        ret = encrypted_file_open(enc, enc->pal_handle, /*create=*/false, /*share_flags=*/0);
+        ret = encrypted_file_internal_open(enc, enc->pal_handle, /*create=*/false,
+                                           /*share_flags=*/0);
         if (ret < 0)
             return ret;
     } else {
