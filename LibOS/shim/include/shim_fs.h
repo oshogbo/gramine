@@ -886,15 +886,11 @@ int fifo_setup_dentry(struct shim_dentry* dent, mode_t perm, int fd_read, int fd
 
 int unix_socket_setup_dentry(struct shim_dentry* dent, mode_t perm);
 
-#define KEEP_URI_PREFIX 0
-
 /*
  * Calculate the URI for a dentry. The URI scheme is determined by file type (`type` field). It
  * needs to be passed separately (instead of using `dent->inode->type`) because the dentry might not
  * have inode associated yet: we might be creating a new file, or looking up a file we don't know
  * yet.
- *
- * If `type` is KEEP_URI_PREFIX, we keep the URI prefix from mount URI.
  */
 int chroot_dentry_uri(struct shim_dentry* dent, mode_t type, char** out_uri);
 

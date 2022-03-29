@@ -615,15 +615,17 @@ static int print_warnings_on_insecure_configs(PAL_HANDLE parent_process) {
         return 0;
     }
 
-    bool verbose_log_level = false;
-    bool sgx_debug         = false;
-    bool use_cmdline_argv  = false;
-    bool use_host_env      = false;
-    bool disable_aslr      = false;
-    bool allow_eventfd     = false;
-    bool allow_all_files   = false;
-    bool use_allowed_files = g_allowed_files_warn;
-    bool enable_sysfs_topo = false;
+    bool verbose_log_level    = false;
+    bool sgx_debug            = false;
+    bool use_cmdline_argv     = false;
+    bool use_host_env         = false;
+    bool disable_aslr         = false;
+    bool allow_eventfd        = false;
+    bool allow_all_files      = false;
+    bool use_allowed_files    = g_allowed_files_warn;
+    bool enable_sysfs_topo    = false;
+    bool protected_files_key  = false;
+    bool encrypted_files_keys = false;
 
     char* log_level_str = NULL;
     ret = toml_string_in(g_pal_public_state.manifest_root, "loader.log_level", &log_level_str);
@@ -665,8 +667,32 @@ static int print_warnings_on_insecure_configs(PAL_HANDLE parent_process) {
     if (ret < 0)
         goto out;
 
+    char* protected_files_key_str = NULL;
+    ret = toml_string_in(g_pal_public_state.manifest_root, "sgx.insecure__protected_files_key",
+                         &protected_files_key_str);
+    if (ret < 0)
+        goto out;
+    if (protected_files_key_str) {
+        free(protected_files_key_str);
+        protected_files_key = true;
+    }
+
+    toml_table_t* manifest_fs = toml_table_in(g_pal_public_state.manifest_root, "fs");
+    if (manifest_fs) {
+        toml_table_t* manifest_fs_keys = toml_table_in(manifest_fs, "insecure__keys");
+        if (manifest_fs_keys) {
+            ret = toml_table_nkval(manifest_fs_keys);
+            if (ret < 0)
+                goto out;
+
+            if (ret > 0)
+                encrypted_files_keys = true;
+        }
+    }
+
     if (!verbose_log_level && !sgx_debug && !use_cmdline_argv && !use_host_env && !disable_aslr &&
-            !allow_eventfd && !allow_all_files && !use_allowed_files && !enable_sysfs_topo) {
+            !allow_eventfd && !allow_all_files && !use_allowed_files && !enable_sysfs_topo &&
+            !protected_files_key && !encrypted_files_keys) {
         /* there are no insecure configurations, skip printing */
         ret = 0;
         goto out;
@@ -711,6 +737,14 @@ static int print_warnings_on_insecure_configs(PAL_HANDLE parent_process) {
     if (enable_sysfs_topo)
         log_always("  - fs.experimental__enable_sysfs_topology = true "
                    "(forwarding sysfs topology from untrusted host to the app)");
+
+    if (protected_files_key)
+        log_always("  - sgx.insecure__protected_files_key = \"...\" "
+                   "(key hardcoded in manifest)");
+
+    if (encrypted_files_keys)
+        log_always("  - fs.insecure__keys.* = \"...\"              "
+                   "(keys hardcoded in manifest)");
 
     log_always("\nGramine will continue application execution, but this configuration must not be "
                "used in production!");

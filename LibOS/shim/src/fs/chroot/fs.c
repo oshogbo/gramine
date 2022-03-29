@@ -72,10 +72,6 @@ int chroot_dentry_uri(struct shim_dentry* dent, mode_t type, char** out_uri) {
             prefix = URI_PREFIX_DEV;
             prefix_len = static_strlen(URI_PREFIX_DEV);
             break;
-        case KEEP_URI_PREFIX:
-            prefix = dent->mount->uri;
-            prefix_len = root - prefix;
-            break;
         default:
             BUG();
     }
@@ -136,16 +132,20 @@ static int chroot_lookup(struct shim_dentry* dent) {
     int ret;
 
     /*
-     * We don't know the file type yet, so we can't construct a PAL URI with the right prefix. Use
-     * the file type from mount URI.
+     * We don't know the file type yet, so we can't construct a PAL URI with the right prefix. In
+     * most cases, a "file:" prefix is good enough: `DkStreamAttributesQuery` will access the file
+     * and report the right file type.
      *
-     * Explanation: In almost all cases, a "file:" URI would be good enough. If the underlying file
-     * is a directory or a device, `DkStreamAttributesQuery` will still recognize it. However, PAL
-     * also recognizes a special "dev:tty" device, which doesn't work that way (i.e. "file:tty" will
-     * not open it).
+     * The only exception is when this is the root dentry of a "dev:" mount, i.e. a directly mounted
+     * device. This is because PAL recognizes a special "dev:tty" device, which needs to be referred
+     * to by this exact URI (and "file:tty" will not work).
      */
     char* uri = NULL;
-    ret = chroot_dentry_uri(dent, KEEP_URI_PREFIX, &uri);
+    mode_t tmp_type = S_IFREG;
+    if (!dent->parent && strstartswith(dent->mount->uri, URI_PREFIX_DEV))
+        tmp_type = S_IFCHR;
+
+    ret = chroot_dentry_uri(dent, tmp_type, &uri);
     if (ret < 0)
         goto out;
 

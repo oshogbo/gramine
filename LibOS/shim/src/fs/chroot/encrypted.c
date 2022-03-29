@@ -98,7 +98,15 @@ static int chroot_encrypted_lookup(struct shim_dentry* dent) {
     char* uri = NULL;
     struct shim_inode* inode = NULL;
 
-    int ret = chroot_dentry_uri(dent, KEEP_URI_PREFIX, &uri);
+    /*
+     * We don't know the file type yet, so we can't construct a PAL URI with the right prefix.
+     * However, "file:" prefix is good enough here: `DkStreamAttributesQuery` will access the file
+     * and report the right file type.
+     *
+     * See also the comment in `fs.c:chroot_lookup` (but note that this case is simpler, because we
+     * don't allow "dev:" mounts).
+     */
+    int ret = chroot_dentry_uri(dent, S_IFREG, &uri);
     if (ret < 0)
         goto out;
 
@@ -194,7 +202,7 @@ static int chroot_encrypted_creat(struct shim_handle* hdl, struct shim_dentry* d
     __UNUSED(flags);
 
     char* uri;
-    int ret = chroot_dentry_uri(dent, KEEP_URI_PREFIX, &uri);
+    int ret = chroot_dentry_uri(dent, S_IFREG, &uri);
     if (ret < 0)
         return ret;
 
