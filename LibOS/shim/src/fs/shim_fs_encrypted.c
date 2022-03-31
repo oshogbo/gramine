@@ -151,7 +151,7 @@ static int encrypted_file_internal_open(struct shim_encrypted_file* enc, PAL_HAN
                                         bool create, pal_share_flags_t share_flags) {
     assert(!enc->pf);
 
-    assert(strstartswith(uri, URI_PREFIX_FILE));
+    assert(strstartswith(enc->uri, URI_PREFIX_FILE));
     const char* path = enc->uri + static_strlen(URI_PREFIX_FILE);
     int ret;
 
