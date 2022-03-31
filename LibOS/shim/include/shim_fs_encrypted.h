@@ -43,7 +43,7 @@ struct shim_encrypted_files_key {
  * by a lock.
  */
 struct shim_encrypted_file {
-    unsigned int use_count;
+    size_t use_count;
     char* uri;
     struct shim_encrypted_files_key* key;
 
@@ -64,6 +64,8 @@ int init_encrypted_files(void);
  *
  * Sets `*out_key` to a key with a given name. Note that the key might not be set yet (see
  * `struct shim_encrypted_files_key`).
+ *
+ * This does not pass ownership of `*out_key`: the key objects are still managed by this module.
  */
 int get_encrypted_files_key(const char* name, struct shim_encrypted_files_key** out_key);
 

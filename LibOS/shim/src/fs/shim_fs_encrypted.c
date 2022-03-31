@@ -299,6 +299,8 @@ int get_encrypted_files_key(const char* name, struct shim_encrypted_files_key** 
     lock(&g_keys_lock);
 
     struct shim_encrypted_files_key* key = get_or_create_key(name);
+    if (!key)
+        return -ENOMEM;
 
     /* TODO: load special keys (MRENCLAVE, MRSIGNER) here */
 
@@ -353,7 +355,7 @@ static int encrypted_file_alloc(const char* uri, struct shim_encrypted_files_key
         return -ENOMEM;
 
     enc->uri = strdup(uri);
-    if (!uri) {
+    if (!enc->uri) {
         free(enc);
         return -ENOMEM;
     }
