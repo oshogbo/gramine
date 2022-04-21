@@ -16,6 +16,7 @@
         __asm__ volatile(                   \
             "pushq $0\r\n"                  \
             "popfq\r\n"                     \
+            "movq $0, %%rdx\r\n"            \
             "movq %1, %%rsp\r\n"            \
             "jmp *%0\r\n"                   \
             :                               \
