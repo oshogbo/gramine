@@ -46,6 +46,12 @@ int main(int argc, char* argv[]) {
     OPEN_TEST(argv[1], O_CREAT | O_EXCL | O_RDWR, /*exists=*/false, /*expect_success=*/true,
               /*do_write=*/true);
 
+    // verify that O_CREAT doesn't override the content
+    OPEN_TEST(argv[1], O_CREAT | O_RDWR, /*exists=*/true, /*expect_success=*/true,
+              /*do_write=*/false);
+    if (get_file_size(argv[1]) == 0)
+        fatal_error("File was truncated\n");
+
     // exists - open should fail
     OPEN_TEST(argv[1], O_CREAT | O_EXCL | O_RDWR, /*exists=*/true, /*expect_success=*/false,
               /*do_write=*/false);
