@@ -34,6 +34,18 @@ static void print_offsets_h(void) {
     printf("#endif /* %s_ASM_OFFSETS_H_ */\n", generated_offsets_name);
 }
 
+static void print_offsets_nasm(void) {
+    printf("; DO NOT MODIFY. THIS FILE WAS AUTO-GENERATED.\n");
+    printf("\n");
+
+    const struct generated_offset* gen;
+    for (gen = &generated_offsets[0]; gen->name; gen++) {
+        printf("%%define %s 0x%" PRIx64 "\n", gen->name, gen->value);
+    }
+
+    printf("\n");
+}
+
 static void print_offsets_py(void) {
     printf("# DO NOT MODIFY. THIS FILE WAS AUTO-GENERATED.\n");
     printf("\n");
@@ -52,6 +64,8 @@ int main(int argc, const char** argv) {
 
     if (!strcmp(argv[1], "--h")) {
         print_offsets_h();
+    } else if (!strcmp(argv[1], "--n")) {
+        print_offsets_nasm();
     } else if (!strcmp(argv[1], "--py")) {
         print_offsets_py();
     } else {

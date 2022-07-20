@@ -138,7 +138,6 @@ gramine_hash_src = vcs_tag(
 libos = shared_library('sysdb',
     libos_sources,
     vdso_data_o,
-    libos_asm_offsets_h,
     gramine_hash_src,
 
     c_args: [

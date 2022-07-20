@@ -63,7 +63,8 @@ if host_machine.cpu_family() == 'x86_64'
         arguments: [
             '-f', 'elf64',
             '-p', '@SOURCE_DIR@/common/src/arch/x86_64/no_exec_stack.nasm',
-            '-I', '@0@/'.format(meson.current_build_dir()),
+            '-I', '@BUILD_DIR@/',
+            '-I', '@CURRENT_SOURCE_DIR@/',
             '-MQ', '@OUTPUT@', '-MF', '@DEPFILE@',
             '@EXTRA_ARGS@',
             '@INPUT@',
