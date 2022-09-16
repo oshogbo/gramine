@@ -165,6 +165,8 @@ The set of extra runtime files is limited to:
 Unsupported keywords and malformed lines are ignored, and invalid values are
 reported as an error.
 
+While emulating ``/etc/`` Gramine will also inherit host's hostname.
+
 This emulation is achieved by taking the host's configuration via various
 APIs and reading the host's configuration files. In the case of Linux PAL,
 most information comes from the host's ``/etc``. The gathered information is

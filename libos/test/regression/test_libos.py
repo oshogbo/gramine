@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import unittest
 
@@ -911,6 +912,17 @@ class TC_30_Syscall(RegressionTestCase):
             if os.path.exists('tmp/lock_file'):
                 os.remove('tmp/lock_file')
         self.assertIn('TEST OK', stdout)
+
+    def test_120_gethostname_localhost(self):
+        # The generic manifest (manifest.template) doesn't use emulated etc.
+        # This means that the /etc/hostname file doesn't exist.
+        # To test it, we pass the empty second argument.
+        stdout, _ = self.run_binary(['hostname', 'localhost'])
+        self.assertIn("TEST OK", stdout)
+
+    def test_121_gethostname_pass_etc(self):
+        stdout, _ = self.run_binary(['hostname_emulate_etc', socket.gethostname()])
+        self.assertIn("TEST OK", stdout)
 
 class TC_31_Syscall(RegressionTestCase):
     def test_000_syscall_redirect(self):
